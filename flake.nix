@@ -114,7 +114,6 @@
             pkgs.freeglut
             pkgs.glib
             pkgs.gtk3
-            pkgs.webkitgtk
             pkgs.webkitgtk_4_1 # Specific WebKit version needed for web rendering
             pkgs.cairo
             pkgs.pango
