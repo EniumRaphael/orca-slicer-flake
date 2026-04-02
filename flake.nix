@@ -15,7 +15,6 @@
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        # Configure nixpkgs to allow unfree packages (needed for NVIDIA tools like nvitop, CUDA dependencies)
         pkgs = import nixpkgs {
           inherit system;
           config = {
@@ -23,217 +22,73 @@
           };
         };
 
-        # Create a wrapper that detects NVIDIA and applies proper environment variables
+        # 1. Le wrapper (ton script de lancement)
         orca-slicer-nvidia-wayland = pkgs.writeShellScriptBin "orca-slicer" ''
-          # Check if we're running on Wayland
           if [ -n "$WAYLAND_DISPLAY" ]; then
             echo "Detected Wayland session"
-
-            # Check for NVIDIA GPU using nvidia-smi or fallback indicators
             if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
               echo "NVIDIA GPU detected, applying Wayland workarounds..."
-
-              # Check for debug/safe mode
+              
               if [ "$ORCA_SAFE_MODE" = "1" ]; then
-                echo "Safe mode enabled - skipping WebKit modifications"
+                echo "Safe mode enabled"
               else
-                # Try hardware-accelerated approach first (Zink)
-                if [ -f "/run/opengl-driver/lib/dri/zink_dri.so" ] || [ -f "/usr/lib/dri/zink_dri.so" ]; then
-                  echo "Using Zink for hardware acceleration"
-                  export __GLX_VENDOR_LIBRARY_NAME=mesa
-                  export __EGL_VENDOR_LIBRARY_FILENAMES=/run/opengl-driver/share/glvnd/egl_vendor.d/50_mesa.json
-                  export MESA_LOADER_DRIVER_OVERRIDE=zink
-                  export GALLIUM_DRIVER=zink
-                else
-                  echo "Zink not available, falling back to software rendering"
-                  export __EGL_VENDOR_LIBRARY_FILENAMES=/run/opengl-driver/share/glvnd/egl_vendor.d/50_mesa.json
+                export __EGL_VENDOR_LIBRARY_FILENAMES=/run/opengl-driver/share/glvnd/egl_vendor.d/50_mesa.json
+                if [ -f "/run/opengl-driver/lib/dri/zink_dri.so" ]; then
+                   export MESA_LOADER_DRIVER_OVERRIDE=zink
+                   export GALLIUM_DRIVER=zink
                 fi
-
-                # Disable DMA-BUF for WebKit (fixes preview pane but may cause device tab issues)
-                # Only set if not already configured by user
-                if [ -z "$WEBKIT_DISABLE_DMABUF_RENDERER" ]; then
-                  echo "Setting WebKit DMA-BUF workaround (set WEBKIT_DISABLE_DMABUF_RENDERER=0 to disable)"
-                  export WEBKIT_DISABLE_DMABUF_RENDERER=1
-                fi
-
-                # Additional NVIDIA Wayland environment variables
+                export WEBKIT_DISABLE_DMABUF_RENDERER=1
                 export __GL_SYNC_TO_VBLANK=0
                 export __GL_THREADED_OPTIMIZATIONS=1
               fi
-
-            else
-              echo "No NVIDIA GPU detected"
             fi
-          else
-            echo "Running on X11"
           fi
-
-          # Launch Orca Slicer
           exec ${pkgs.orca-slicer}/bin/orca-slicer "$@"
         '';
 
-        # Create desktop entry
+        # 2. Le fichier Desktop
         orca-slicer-desktop = pkgs.makeDesktopItem {
           name = "orca-slicer-nvidia-wayland";
           desktopName = "Orca Slicer (NVIDIA Wayland)";
-          exec = "${orca-slicer-nvidia-wayland}/bin/orca-slicer %F";
+          exec = "orca-slicer %F"; # Utilise le nom du binaire dans le PATH
           icon = "orca-slicer";
-          comment = "3D Slicer for FDM/FFF 3D Printers with NVIDIA Wayland support";
-          categories = [
-            "Graphics"
-            "3DGraphics"
-            "Engineering"
-          ];
-          mimeTypes = [
-            "model/stl"
-            "application/vnd.ms-3mfdocument"
-            "application/prs.wavefront-obj"
-            "application/x-amf"
-            "x-scheme-handler/orcaslicer"
-          ];
-          startupNotify = true;
+          comment = "3D Slicer with NVIDIA Wayland support";
+          categories = [ "Graphics" "3DGraphics" ];
+          mimeTypes = [ "model/stl" "application/vnd.ms-3mfdocument" "x-scheme-handler/orcaslicer" ];
         };
 
-        # Full package with all dependencies
-        orca-slicer-full = pkgs.buildEnv {
+        # 3. LE PAQUET FINAL (Correction de l'erreur Permission Denied)
+        orca-slicer-full = pkgs.symlinkJoin {
           name = "orca-slicer-nvidia-wayland";
-          paths = with pkgs; [
-            orca-slicer-nvidia-wayland
-            orca-slicer-desktop
-            # Note: pkgs.orca-slicer is called by the wrapper, not included directly to avoid collision
-
-            # Required for NVIDIA Wayland support
-            mesa
-            libglvnd
-            vulkan-loader
-            vulkan-tools
-
-            # Additional dependencies that might be needed
-            libGL
-            libGLU
-            freeglut
-            glib
-            gtk3
-            webkitgtk_4_1 # Specific WebKit version needed for web rendering
-            cairo
-            pango
-            harfbuzz
-            gdk-pixbuf
-            atk
-
-            # Network and SSL dependencies for web connections (minimal set)
-            openssl
-            cacert
+          paths = [
+            orca-slicer-nvidia-wayland # Ton script (prioritaire)
+            orca-slicer-desktop        # Ton raccourci bureau
+            pkgs.orca-slicer           # Le vrai paquet (pour les icônes, ressources, etc.)
           ];
 
-          # Make sure icons are available if present
           postBuild = ''
-            # Copy icon if available from original orca-slicer package
-            if [ -d "${pkgs.orca-slicer}/share/icons" ]; then
-              mkdir -p $out/share/icons
-              cp -r ${pkgs.orca-slicer}/share/icons/* $out/share/icons/
-            fi
-            rm $out/bin/orca-slicer
+            # On supprime le lien vers le binaire original pour ne pas avoir de conflit
+            # et on s'assure que 'orca-slicer' pointe vers ton wrapper.
+            rm -f $out/bin/orca-slicer
             ln -s ${orca-slicer-nvidia-wayland}/bin/orca-slicer $out/bin/orca-slicer
+            
+            # Les icônes sont déjà liées automatiquement par symlinkJoin 
+            # car pkgs.orca-slicer est dans 'paths'. Pas besoin de 'cp'.
           '';
         };
 
       in
       {
-        packages = {
-          default = orca-slicer-full;
-          orca-slicer = orca-slicer-full;
-          orca-slicer-wrapper = orca-slicer-nvidia-wayland;
+        packages.default = orca-slicer-full;
+
+        apps.default = {
+          type = "app";
+          program = "${orca-slicer-full}/bin/orca-slicer";
         };
 
-        apps = {
-          default = {
-            type = "app";
-            program = "${orca-slicer-nvidia-wayland}/bin/orca-slicer";
-          };
-          orca-slicer = {
-            type = "app";
-            program = "${orca-slicer-nvidia-wayland}/bin/orca-slicer";
-          };
-        };
-
-        # Development shell for testing
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            orca-slicer-full
-            orca-slicer # Original package available for development
-
-            # Development tools
-            vulkan-tools
-            glxinfo
-            nvitop # Interactive NVIDIA GPU process viewer
-            nvtopPackages.full # htop-like GPU monitor for NVIDIA/AMD/Intel
-            pciutils # PCI utilities for lspci
-
-            # Debugging tools
-            strace
-            ltrace
-            gdb
-          ];
-
-          shellHook = ''
-            echo "Orca Slicer NVIDIA Wayland Development Shell"
-            echo "========================================"
-            echo ""
-            echo "Troubleshooting:"
-            echo "  - If device tab crashes: WEBKIT_DISABLE_DMABUF_RENDERER=0 nix run ."
-            echo "  - If 3D preview fails: WEBKIT_DISABLE_DMABUF_RENDERER=1 nix run . (default)"
-            echo "  - For safe mode: ORCA_SAFE_MODE=1 nix run ."
-            echo "  - For X11 fallback: GDK_BACKEND=x11 nix run ."
-            echo ""
-            echo "Note: Unfree packages are enabled for NVIDIA tools (nvitop, CUDA dependencies)"
-            echo ""
-            echo "GPU Monitoring Tools included:"
-            echo "  - nvitop: Interactive NVIDIA GPU viewer with colorful interface"
-            echo "  - nvtop:  htop-like monitor for all GPU types (via nvtopPackages.full)"
-            echo "  - Both provide better alternatives to nvidia-smi"
-            echo ""
-            echo "Available commands:"
-            echo "  orca-slicer       - Launch Orca Slicer with NVIDIA Wayland support"
-            echo "  vulkaninfo        - Show Vulkan info"
-            echo "  glxinfo           - Show OpenGL info"
-            echo "  nvitop            - Interactive NVIDIA GPU process viewer"
-            echo "  nvtop             - htop-like GPU monitor (from nvtopPackages.full)"
-            echo "  nvidia-smi        - Show NVIDIA GPU info (if available)"
-            echo ""
-            echo "Environment variables that will be set automatically:"
-            echo "  - WAYLAND_DISPLAY detection"
-            echo "  - NVIDIA GPU detection"
-            echo "  - Zink driver configuration"
-            echo "  - WebKit DMA-BUF workarounds"
-            echo ""
-            echo "GPU Monitoring Tools included:"
-            echo "  - nvitop: Interactive NVIDIA GPU viewer with colorful interface"
-            echo "  - nvtop:  htop-like monitor for NVIDIA/AMD/Intel GPUs"
-            echo "  - Both provide better alternatives to nvidia-smi"
-            echo ""
-
-            # Show current environment info
-            if [ -n "$WAYLAND_DISPLAY" ]; then
-              echo "Current session: Wayland"
-            else
-              echo "Current session: X11"
-            fi
-
-            if command -v nvidia-smi &> /dev/null; then
-              echo "NVIDIA GPU: Available (nvidia-smi found)"
-            elif command -v nvitop &> /dev/null; then
-              echo "NVIDIA GPU: Use 'nvitop' or 'nvtop' to check"
-            else
-              echo "NVIDIA GPU: Install NVIDIA drivers to check"
-            fi
-
-            if [ -f "/run/opengl-driver/lib/dri/zink_dri.so" ]; then
-              echo "Zink driver: Available"
-            else
-              echo "Zink driver: Not found"
-            fi
-          '';
+          buildInputs = [ orca-slicer-full pkgs.nvitop pkgs.nvtopPackages.full ];
+          shellHook = ''echo "Orca Slicer NVIDIA Dev Shell loaded."'';
         };
       }
     );
