@@ -133,6 +133,8 @@
               mkdir -p $out/share/icons
               cp -r ${pkgs.orca-slicer}/share/icons/* $out/share/icons/
             fi
+            rm $out/bin/orca-slicer
+            ln -s ${orca-slicer-nvidia-wayland}/bin/orca-slicer $out/bin/orca-slicer
           '';
         };
 
