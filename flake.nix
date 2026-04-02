@@ -97,33 +97,33 @@
         # Full package with all dependencies
         orca-slicer-full = pkgs.buildEnv {
           name = "orca-slicer-nvidia-wayland";
-          paths = [
+          paths = with pkgs; [
             orca-slicer-nvidia-wayland
             orca-slicer-desktop
             # Note: pkgs.orca-slicer is called by the wrapper, not included directly to avoid collision
 
             # Required for NVIDIA Wayland support
-            pkgs.mesa
-            pkgs.libglvnd
-            pkgs.vulkan-loader
-            pkgs.vulkan-tools
+            mesa
+            libglvnd
+            vulkan-loader
+            vulkan-tools
 
             # Additional dependencies that might be needed
-            pkgs.libGL
-            pkgs.libGLU
-            pkgs.freeglut
-            pkgs.glib
-            pkgs.gtk3
-            pkgs.webkitgtk_4_1 # Specific WebKit version needed for web rendering
-            pkgs.cairo
-            pkgs.pango
-            pkgs.harfbuzz
-            pkgs.gdk-pixbuf
-            pkgs.atk
+            libGL
+            libGLU
+            freeglut
+            glib
+            gtk3
+            webkitgtk_4_1 # Specific WebKit version needed for web rendering
+            cairo
+            pango
+            harfbuzz
+            gdk-pixbuf
+            atk
 
             # Network and SSL dependencies for web connections (minimal set)
-            pkgs.openssl
-            pkgs.ca-certificates
+            openssl
+            cacert
           ];
 
           # Make sure icons are available if present
